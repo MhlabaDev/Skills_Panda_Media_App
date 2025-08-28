@@ -81,5 +81,4 @@ npm i expo-image expo-notifications
 
 4.Run the app:
 npm start
-
 Open the app in Expo Go on your physical device or a simulator to see it in action.

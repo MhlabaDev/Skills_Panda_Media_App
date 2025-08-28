@@ -125,7 +125,7 @@ export const ALL_POSTS: Post[] = [
     dueAt: new Date(Date.now() + 1000 * 60 * 2).toISOString(),
     description: "Professional legal advice to ensure your contracts and business operations are compliant."
   },
-  // 18 new posts:
+
   {
     id: "13",
     title: "SEO Optimization",

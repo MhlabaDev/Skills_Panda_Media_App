@@ -22,7 +22,9 @@ export const Skeleton: React.FC<SkeletonProps> = ({ style }) => {
 
   const translateX = shimmerAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [-200, 200], // width of the shimmer sweep
+    outputRange: [-200, 200],  /// </summary>
+  /// width of shimmer sweep
+  /// </summary>
   });
 
   return (
@@ -43,11 +45,14 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: "#e1e9ee",
     overflow: "hidden",
-    borderRadius: 12, // rounded corners
+    borderRadius: 12, 
   },
+  /// </summary>
+  /// shimmer block width
+  /// </summary>
   shimmer: {
     flex: 1,
-    width: 200, // shimmer block width
+    width: 200, 
     backgroundColor: "#f6f7f8",
     opacity: 0.3,
   },

@@ -12,39 +12,32 @@ import {
   ListRenderItemInfo,
 } from "react-native";
 import { PostCard } from "../components/PostCard";
-import { ALL_POSTS, Post } from "../data/posts";
+import { Post } from "../data/posts";
+import { fetchPosts } from "../api/mockApi";
 import { requestNotifPermissions, scheduleReminder } from "../notifications";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../navigation/types";
 import { Image } from "expo-image";
 
-const PAGE_SIZE = 10;
-const ITEM_HEIGHT = 160;
 
-const PostCardWrapper = React.memo(({ post, onRemind, onOpen }: {
-  post: Post;
-  onRemind: (post: Post) => void;
-  onOpen: (post: Post) => void;
-}) => {
-  return <PostCard post={post} onRemind={onRemind} onOpen={onOpen} />;
-});
 
 export const PostsList: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
   const [posts, setPosts] = useState<Post[]>([]);
-  const [filteredPosts, setFilteredPosts] = useState<Post[]>([]);
   const [filterText, setFilterText] = useState("");
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
+
   const flatListRef = useRef<FlatList<Post>>(null);
   const loadingMoreRef = useRef(false);
-
-  const scheduledReminders = useRef<Set<string>>(new Set());
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const scheduledReminders = useRef<Set<string>>(new Set());
+  const onEndReachedCalledDuringMomentum = useRef(false);
 
   useEffect(() => {
     requestNotifPermissions().then((granted) => {
@@ -55,23 +48,15 @@ export const PostsList: React.FC = () => {
     loadInitialPosts();
   }, []);
 
-  const fetchPostsPage = async (pageNumber: number): Promise<Post[]> => {
-    await new Promise((res) => setTimeout(res, 600)); // simulate delay
-    const start = pageNumber * PAGE_SIZE;
-    return ALL_POSTS.slice(start, start + PAGE_SIZE);
-  };
-
   const loadInitialPosts = async () => {
     setRefreshing(true);
     setError(null);
-    setHasMore(true);
     try {
-      const firstPagePosts = await fetchPostsPage(0);
-      setPosts(firstPagePosts);
-      setFilteredPosts(filterPosts(filterText, firstPagePosts));
-      setPage(0);
-      setHasMore(firstPagePosts.length === PAGE_SIZE);
-      prefetchImages(firstPagePosts);
+      const { items, nextPage } = await fetchPosts(1);
+      setPosts(items);
+      setPage(nextPage ?? 1);
+      setHasMore(!!nextPage);
+      prefetchImages(items);
       flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
     } catch (e) {
       setError((e as Error).message);
@@ -80,37 +65,20 @@ export const PostsList: React.FC = () => {
     }
   };
 
-  const loadMore = async (viaButton: boolean = false) => {
+  const loadMore = async (viaButton = false) => {
     if (loadingMoreRef.current || refreshing || !hasMore) return;
-
     loadingMoreRef.current = true;
     setLoading(true);
     try {
-      const nextPage = page + 1;
-      const nextPosts = await fetchPostsPage(nextPage);
-      const newPosts = nextPosts.filter(p => !posts.some(existing => existing.id === p.id));
-
-      if (newPosts.length === 0) {
-        setHasMore(false);
-        return;
-      }
-
+      const { items, nextPage } = await fetchPosts(page);
+      const newPosts = items.filter(p => !posts.some(existing => existing.id === p.id));
       const updatedPosts = [...posts, ...newPosts];
       setPosts(updatedPosts);
-      setFilteredPosts(filterPosts(filterText, updatedPosts));
-      setPage(nextPage);
-      setHasMore(nextPosts.length === PAGE_SIZE);
+      setPage(nextPage ?? page);
+      setHasMore(!!nextPage);
       prefetchImages(newPosts);
 
-      if (viaButton && newPosts.length > 0) {
-        setTimeout(() => {
-          flatListRef.current?.scrollToIndex({
-            index: posts.length,
-            animated: true,
-            viewPosition: 0,
-          });
-        }, 300);
-      }
+   
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -145,38 +113,30 @@ export const PostsList: React.FC = () => {
     navigation.navigate("PostDetail", { postId: post.id });
   };
 
-  const filterPosts = (text: string, data: Post[]) => {
-    const lowered = text.toLowerCase();
-    return data.filter((post) =>
-      post.title.toLowerCase().includes(lowered) ||
-      post.supplier.toLowerCase().includes(lowered) ||
-      post.amountZar.toString().includes(lowered)
+  const filteredPosts = useMemo(() => {
+    const lower = filterText.toLowerCase();
+    return posts.filter(post =>
+      post.title.toLowerCase().includes(lower) ||
+      post.supplier.toLowerCase().includes(lower) ||
+      post.amountZar.toString().includes(lower)
     );
-  };
+  }, [filterText, posts]);
 
   const handleFilterChange = (text: string) => {
     setFilterText(text);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => {
-      setFilteredPosts(filterPosts(text, posts));
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     }, 300);
   };
 
-  const renderItem = useCallback(({ item }: ListRenderItemInfo<Post>) => {
-    return <PostCardWrapper post={item} onRemind={handleRemind} onOpen={handleOpen} />;
-  }, []);
-
-const getItemLayout = useCallback(
-  (_data: ArrayLike<Post> | null | undefined, index: number) => ({
-    length: ITEM_HEIGHT,
-    offset: ITEM_HEIGHT * index,
-    index,
-  }),
-  []
-);
+  const renderItem = useCallback(({ item }: ListRenderItemInfo<Post>) => (
+    <PostCard post={item} onRemind={handleRemind} onOpen={handleOpen} />
+  ), []);
 
 
-  const ListHeader = useMemo(() => (
+
+  const ListHeader = (
     <View style={styles.filterContainer}>
       <TextInput
         placeholder="Search by title, supplier, or amount"
@@ -188,19 +148,26 @@ const getItemLayout = useCallback(
         returnKeyType="search"
       />
     </View>
-  ), [filterText]);
+  );
 
-  const ListFooter = () => {
-    if (loading) return <ActivityIndicator style={{ margin: 16 }} />;
-    if (!hasMore) {
-      return (
-        <View style={{ padding: 16, alignItems: "center" }}>
-          <Text style={{ color: "#666", fontSize: 14 }}>No more posts to load.</Text>
-        </View>
-      );
-    }
-    return null;
-  };
+const ListFooter = () => {
+  return (
+    <View style={{ padding: 16, minHeight: 150, justifyContent: 'center' }}>
+      {loading && <ActivityIndicator style={{ marginBottom: 16 }} />}
+      {!hasMore && (
+        <Text style={{ color: "#666", fontSize: 14, textAlign: "center" }}>
+          No more posts to load.
+        </Text>
+      )}
+      <View style={{ marginTop: 16 }}>
+        <Button title="Load More" onPress={() => loadMore(true)} disabled={loading || !hasMore} />
+        <View style={{ height: 10 }} />
+        <Button title="Reload" onPress={loadInitialPosts} disabled={loading || refreshing} />
+      </View>
+    </View>
+  );
+};
+
 
   if (error && posts.length === 0) {
     return (
@@ -217,45 +184,36 @@ const getItemLayout = useCallback(
 
   return (
     <>
-      <FlatList
-        ref={flatListRef}
-        data={filteredPosts}
-        keyExtractor={item => item.id}
-        renderItem={renderItem}
-        getItemLayout={getItemLayout}
-        ListHeaderComponent={ListHeader}
-        stickyHeaderIndices={[0]}
-        onEndReached={() => {
-          if (!loading && hasMore) loadMore();
-        }}
-        onEndReachedThreshold={0.5}
-        ListFooterComponent={ListFooter}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadInitialPosts} />}
-        keyboardShouldPersistTaps="handled"
-        initialNumToRender={10}
-        maxToRenderPerBatch={10}
-        windowSize={7}
-        removeClippedSubviews
-        maintainVisibleContentPosition={{
-          minIndexForVisible: 0,
-        }}
-      />
-      <View style={styles.buttonsContainer}>
-        <Button
-          title="Load More"
-          onPress={() => loadMore(true)}
-          disabled={loading || !hasMore}
-        />
-        <View style={{ height: 10 }} />
-        <Button
-          title="Reload"
-          onPress={loadInitialPosts}
-          disabled={loading || refreshing}
-        />
-      </View>
+<FlatList
+  ref={flatListRef}
+  data={filteredPosts}
+  keyExtractor={item => item.id}
+  renderItem={renderItem}
+  ListHeaderComponent={ListHeader}
+  stickyHeaderIndices={[0]}
+  onMomentumScrollBegin={() => {
+    onEndReachedCalledDuringMomentum.current = false;
+  }}
+  onEndReached={() => {
+    if (!onEndReachedCalledDuringMomentum.current && !loading && hasMore) {
+      loadMore();
+      onEndReachedCalledDuringMomentum.current = true;
+    }
+  }}
+  onEndReachedThreshold={0.5}
+  ListFooterComponent={ListFooter}
+  refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadInitialPosts} />}
+  keyboardShouldPersistTaps="handled"
+  initialNumToRender={10}
+  maxToRenderPerBatch={10}
+  windowSize={7}
+  maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+  contentContainerStyle={{ paddingBottom: 120 }}
+/>
     </>
   );
 };
+
 const styles = StyleSheet.create({
   centered: {
     flex: 1,
